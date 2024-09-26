@@ -147,4 +147,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Your Name - slightlyarrogant@gmail.com
 
-Project Link: [https://github.com/yourusername/video_transcription_project](https://github.com/yourusername/video_transcription_project)
+Project Link: [https://github.com/slightlyarrogant/video_transcription_project](https://github.com/slightlyarrogant/video_transcription_project)
