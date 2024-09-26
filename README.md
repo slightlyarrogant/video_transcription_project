@@ -145,6 +145,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact
 
-Your Name - your.email@example.com
+Your Name - slightlyarrogant@gmail.com
 
 Project Link: [https://github.com/yourusername/video_transcription_project](https://github.com/yourusername/video_transcription_project)
