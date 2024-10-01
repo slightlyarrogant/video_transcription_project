@@ -1,96 +1,88 @@
 from openai import OpenAI
+from anthropic import Anthropic
 import os
 from dotenv import load_dotenv, find_dotenv
 
-client = None
+openai_client = None
+anthropic_client = None
 
-def init_openai_client():
-    global client
+def init_clients():
+    global openai_client, anthropic_client
     dotenv_path = find_dotenv(usecwd=True)
     if dotenv_path:
-        print(f"Training Material Generator: Found .env file at: {dotenv_path}")
+        print(f"Training Material: Found .env file at: {dotenv_path}")
         load_dotenv(dotenv_path, override=True)
     else:
-        print("Training Material Generator: No .env file found!")
+        print("Training Material: No .env file found!")
 
-    api_key = os.getenv("OPENAI_API_KEY", "Not found")
-    print(f"Training Material Generator: Using API key (first 5 chars): {api_key[:5]}...")
-    client = OpenAI(api_key=api_key)
+    openai_api_key = os.getenv("OPENAI_API_KEY", "Not found")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "Not found")
+    
+    print(f"Training Material: Using OpenAI API key (first 5 chars): {openai_api_key[:5]}...")
+    print(f"Training Material: Using Anthropic API key (first 5 chars): {anthropic_api_key[:5]}...")
+    
+    openai_client = OpenAI(api_key=openai_api_key)
+    anthropic_client = Anthropic(api_key=anthropic_api_key)
 
-def extract_key_points(transcript: str, config: dict, verbose: bool = False) -> str:
-    """
-    Extract key points from the transcript using the model specified in the config.
+def generate_section(prompt, model, max_tokens, language):
+    full_prompt = f"Generuj odpowiedź w języku polskim. {prompt}"
+    system_message = f"Jesteś ekspertem w tworzeniu kompleksowych materiałów szkoleniowych w języku {language}."
     
-    Args:
-    transcript (str): The full transcript of the video.
-    config (dict): Configuration dictionary containing API details.
-    verbose (bool): Whether to print verbose output.
-    
-    Returns:
-    str: Extracted key points.
-    """
-    global client
-    if client is None:
-        init_openai_client()
-
-    if verbose:
-        print("Extracting key points from transcript...")
-    
-    try:
-        response = client.chat.completions.create(
-            model=config['model'],
-            messages=[
-                {"role": "system", "content": config['prompts']['system']},
-                {"role": "user", "content": config['prompts']['key_points'].format(transcript=transcript)}
-            ],
-            max_tokens=config['max_tokens'],
+    if model.startswith("gpt"):
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": full_prompt}
+        ]
+        response = openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens
         )
-
-        if verbose:
-            print("Key points extraction completed.")
-
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Error extracting key points: {str(e)}")
-        return "Error: Unable to extract key points."
-
-def generate_training_material(transcript: str, summary: str, config: dict) -> str:
-    if config['general']['VERBOSE']:
-        print("Generating training material...")
-
-    key_points = extract_key_points(transcript, config['training_material'], config['general']['VERBOSE'])
+        return response.choices[0].message.content
     
-    prompts = config['training_material']['prompts']
+    elif model.startswith("claude"):
+        response = anthropic_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_message,
+            messages=[
+                {"role": "user", "content": full_prompt}
+            ]
+        )
+        return response.content[0].text
     
-    training_material = f"""
-# Comprehensive Training Material
+    else:
+        raise ValueError(f"Unsupported model: {model}")
+def generate_training_material(transcript, config, title=None):
+    if openai_client is None or anthropic_client is None:
+        init_clients()
 
-{prompts['intro'].format(title='Video Title')}
+    model = config['training_material']['model']
+    max_tokens = config['training_material']['max_tokens']
+    language = config['training_material']['language']
 
-## Executive Summary
+    sections = [
+        ("Wprowadzenie", config['training_material']['prompts']['introduction']),
+        ("Podsumowanie menedżerskie", config['training_material']['prompts']['executive_summary']),
+        ("Kluczowe koncepcje i szczegółowe wyjaśnienia", config['training_material']['prompts']['key_concepts']),
+        ("Praktyczne zastosowania", config['training_material']['prompts']['practical_applications']),
+        ("Studia przypadków lub przykłady", config['training_material']['prompts']['case_studies']),
+        ("Pytania kontrolne", config['training_material']['prompts']['review_questions']),
+        ("Ćwiczenia praktyczne", config['training_material']['prompts']['practical_exercises']),
+        ("Dalsza lektura", config['training_material']['prompts']['further_reading']),
+        ("Zakończenie", config['training_material']['prompts']['conclusion'])
+    ]
 
-{prompts['summary'].format(summary=summary)}
+    generated_sections = {}
+    for section_title, prompt in sections:
+        section_content = generate_section(prompt.format(transcript=transcript, title=title), model, max_tokens, language)
+        generated_sections[section_title] = section_content
 
-## Key Concepts and Detailed Explanations
+    # Combine sections
+    combined_material = "\n\n".join([f"# {section_title}\n\n{content}" for section_title, content in generated_sections.items()])
 
-{prompts['key_points_section'].format(points=key_points)}
+    # Final pass for coherence and completeness
+    final_prompt = config['training_material']['prompts']['final_pass'].format(material=combined_material, title=title)
+    final_material = generate_section(final_prompt, model, max_tokens * 3, language)
 
-## Additional Notes
-
-- [Include any additional notes or observations here]
-
-## Practical Applications
-
-- [Suggest practical applications or exercises related to the content]
-
-## Further Reading
-
-- [Provide links or references for further reading on the topics covered]
-
-{prompts['conclusion']}
-"""
-
-    if config['general']['VERBOSE']:
-        print("Training material generation completed.")
-
-    return training_material
+    return final_material

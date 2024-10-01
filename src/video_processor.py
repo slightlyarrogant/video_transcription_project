@@ -1,54 +1,66 @@
 import os
+from datetime import datetime
 from src.audio_handler import extract_audio, chunk_audio
 from src.transcription import transcribe_audio
 from src.summarization import summarize_text
 from src.training_material_generator import generate_training_material
-from src.utils.file_operations import ensure_dir, list_files, safe_move
+from src.utils.file_operations import ensure_dir, list_files, safe_move, get_file_extension
 
 def process_video(video_path, output_folder, config):
-    if config['general']['VERBOSE']:
-        print(f"Processing video: {video_path}")
+    # Create a subfolder for audio files
+    audio_folder = os.path.join(output_folder, "audio_files")
+    ensure_dir(audio_folder)
 
+    # Extract audio from video
     base_name = os.path.splitext(os.path.basename(video_path))[0]
-    video_output_folder = os.path.join(output_folder, base_name)
-    ensure_dir(video_output_folder)
-    
-    if config['general']['VERBOSE']:
-        print("Extracting audio...")
-    audio_path = os.path.join(video_output_folder, "extracted_audio.wav")
+    audio_path = os.path.join(audio_folder, f"{base_name}.wav")
     extract_audio(video_path, audio_path)
-    
-    if config['general']['VERBOSE']:
-        print("Transcribing audio...")
-    chunks = chunk_audio(audio_path, config['audio']['chunk_length_ms'], config['audio']['overlap_ms'])
-    transcript = transcribe_audio(chunks, config['transcription'], config['general']['VERBOSE'])
-    
-    if config['general']['VERBOSE']:
-        print("Summarizing transcript...")
-    summary = summarize_text(transcript, config['summarization'], config['general']['VERBOSE'])
-    
-    if config['general']['VERBOSE']:
-        print("Generating training material...")
-    training_material = generate_training_material(transcript, summary, config)
-    
-    if config['general']['VERBOSE']:
-        print("Saving outputs...")
-    with open(os.path.join(video_output_folder, "transcript.txt"), "w") as f:
-        f.write(transcript)
-    with open(os.path.join(video_output_folder, "summary.txt"), "w") as f:
-        f.write(summary)
-    with open(os.path.join(video_output_folder, "training_material.md"), "w") as f:
-        f.write(training_material)
 
-    if config['general']['VERBOSE']:
-        print(f"Finished processing video: {video_path}")
+    # Transcribe audio
+    transcript = transcribe_audio(audio_path, config)
 
-def process_videos_in_folder(input_folder, output_folder, config):
-    video_files = list_files(input_folder, extensions=[".mp4", ".avi", ".mov"])
-    for video_path in video_files:
-        process_video(video_path, output_folder, config)
-        if config['general']['VERBOSE']:
-            print(f"Moving processed video to 'processed' folder: {video_path}")
-        processed_folder = os.path.join(input_folder, "processed")
-        ensure_dir(processed_folder)
-        safe_move(video_path, os.path.join(processed_folder, os.path.basename(video_path)))
+    return transcript, base_name
+
+def process_videos_in_folder(input_folder, output_folder, processed_folder, config):
+    ensure_dir(output_folder)
+    ensure_dir(processed_folder)
+
+    video_extensions = ['.mp4', '.avi', '.mov']  # Add or remove video formats as needed
+    videos = [f for f in list_files(input_folder) if get_file_extension(f).lower() in video_extensions]
+
+    for video_path in videos:
+        filename = os.path.basename(video_path)
+        start_time = datetime.now()
+        print(f"Starting processing of {filename} at {start_time}")
+
+        try:
+            # Process the video
+            transcript, base_name = process_video(video_path, output_folder, config)
+
+            # Generate summary
+            summary = summarize_text(transcript, config, title=base_name)
+
+            # Generate training material
+            training_material = generate_training_material(transcript, config, title=base_name)
+
+            # Save outputs
+            with open(os.path.join(output_folder, f"{base_name}_summary.md"), "w", encoding="utf-8") as f:
+                f.write(summary)
+            with open(os.path.join(output_folder, f"{base_name}_training_material.md"), "w", encoding="utf-8") as f:
+                f.write(training_material)
+
+            # Move processed video to the processed folder
+            safe_move(video_path, os.path.join(processed_folder, filename))
+
+            finish_time = datetime.now()
+            elapsed_time = finish_time - start_time
+            print(f"Finished processing {filename}")
+            print(f"Start time: {start_time}")
+            print(f"Finish time: {finish_time}")
+            print(f"Elapsed time: {elapsed_time}")
+            print("------------------------")
+
+        except Exception as e:
+            print(f"Error processing {filename}: {str(e)}")
+            import traceback
+            traceback.print_exc()  # This will print the full stack trace
